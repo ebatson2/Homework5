@@ -1,0 +1,341 @@
+---
+title: "EDA Homework"
+format: html
+editor: visual
+---
+
+# Task 1: Read in the Data and Modify
+
+Reading in the data with provided code:
+
+```{r}
+math_df=read.table("student_performance/student-mat.csv",sep=";",header=TRUE)
+port_df=read.table("student_performance/student-por.csv",sep=";",header=TRUE)
+
+combo_df=merge(math_df, port_df, by=c("school","sex","age","address","famsize","Pstatus","Medu","Fedu","Mjob","Fjob","reason","nursery","internet"))
+print(nrow(combo_df)) # 382 students
+
+head(combo_df)
+```
+
+Load additional libraries:
+
+```{r}
+#| output: false
+#| 
+# suppress output
+library(readxl)
+library(tidyverse)
+```
+
+Reading in the data with tidyverse:
+
+```{r}
+#| output: false
+
+# suppress output
+math_df <- read_delim("student_performance/student-mat.csv")
+port_df <- read_delim("student_performance/student-por.csv")
+```
+
+```{r}
+combo_df <- math_df |>
+  inner_join(port_df, by=c("school","sex","age","address","famsize","Pstatus","Medu","Fedu","Mjob","Fjob","reason","nursery","internet"))
+```
+
+There is an issue here with the inner join on this set of variables, which is that the function does not know which rows match up with which in the two datasets. If we use more variables, that may help narrow down which row goes to which:
+
+```{r}
+combo_df <- math_df |>
+  inner_join(  port_df,  by = ( colnames(math_df)[!colnames(math_df) %in% c("G1", "G2", "G3", "paid", "absences")] )  )
+
+head(combo_df)
+
+print(nrow(combo_df)) # 320 students
+```
+
+Note: There are only 320 students now rather than the 382 that we saw before. Not all students are in both datasets.
+
+Let's look at the following 4 categorical variables:
+
+-   address
+-   internet
+-   traveltime
+-   studytime
+
+Converting these variables to factors:
+```{r}
+# create function since code is repeated 3 times
+convert_4_vars_to_factor <- function(df){
+  return (df |>
+  mutate(address=as.factor(address),
+         internet=as.factor(internet),
+         traveltime=as.factor(traveltime),
+         studytime=as.factor(studytime)
+         ))
+}
+
+math_df <- convert_4_vars_to_factor(math_df)
+port_df <- convert_4_vars_to_factor(port_df)
+combo_df <- convert_4_vars_to_factor(combo_df)
+
+head(math_df)
+head(port_df)
+head(combo_df)
+```
+
+# Task 2: Summarize the Data
+
+## Combined data - how is it stored?
+
+```{r}
+head(combo_df)
+```
+
+**Notes:**
+
+-   most columns are of type character
+-   character type variables are not always intuitive (e.g. value of 'A' for Pstatus means the parents live apart)
+-   character type column names can be hard to read as well (e.g. 'Dalc' means workday alcohol consumption)
+-   many columns of type double are not numerical, e.g. Medu (mother's education level)
+-   columns not used for joining have column names appended with '.x' (for math dataset values) and '.y' (for Portuguese dataset values)
+
+## Combined data - where are the missing values?
+```{r}
+sum_na <- function(column){
+ sum(is.na(column))
+}
+na_counts <- combo_df |>
+ summarize(across(everything(), sum_na))
+na_counts
+```
+
+**Notes:**
+
+-   There are no missing values in any column!
+
+## Categorical Variables
+
+### Contingency tables:
+```{r}
+# one-way contingency table with address variable
+cat("Address 1-way contingency table:")
+table(combo_df$address)
+
+# two-way contingency table with variables address and internet
+cat("\nAddress, Internet 2-way contingency table:")
+table(combo_df$address, combo_df$internet)
+
+# three-way contingency table with variables address, internet, and studytime
+cat("\nAddress, Internet, and studytime 3-way contingency tables:\n")
+table(combo_df$address, combo_df$internet, combo_df$studytime)
+```
+
+**Reading the tables:**
+
+-   253 of the 320 students in the dataset have urban addresses
+-   Of the 67 students with a rural address, 21 do not have internet access at home, and 46 of them do.
+-   For students with the most studytime (studytime=4), half of those with rural addresses have internet access (3 of 6).
+
+```{r}
+# conditional two-way tables
+
+# by subsetting data -----> filter out urban addresses:
+filtered_df <- combo_df |> 
+                filter(address=='R')
+cat("Internet and studytime contingency table, filtered for rural address:")
+table(filtered_df$internet, filtered_df$studytime)
+
+# by subsetting a 3-way table:
+cat("\nInternet and studytime contingency table, subsetted from 3-way table:")
+three_way_table <- table(combo_df$internet, combo_df$studytime, combo_df$address)
+three_way_table[, , "R"]
+```
+
+Created using dplyr:
+```{r}
+combo_df |>
+ group_by(address, internet) |>
+ summarize(count = n()) |>
+ pivot_wider(names_from = internet, values_from = count)
+```
+
+Bar graphs:
+```{r}
+#| output: false
+
+# suppress output
+# base plot
+base_plot <- ggplot(data = combo_df |>
+  group_by(address, internet) |>
+  summarize(count = n()), aes(x = internet, y = count, fill = address)) +
+  ggtitle("Rural and Urban Address Counts by Internet Access")
+```
+
+```{r}
+# stacked
+base_plot + geom_bar(stat = "identity")
+
+# side-by-side
+base_plot + geom_bar(position = "dodge", stat = "identity")
+```
+
+
+## Numeric Variables
+
+Numeric Variables: Age, absences, G1, G2, G3
+
+Measures of center and spread for absences.x, G1.x, and G3.x:
+```{r}
+# make lists for choosing columns
+all_num_vars <- c("age", "absences.x", "absences.y", "G1.x", "G1.y", "G2.x", "G2.y", "G3.x", "G3.y")
+center_vars <- c("absences.x", "G1.x", "G3.x")
+
+# function for finding measures of center and spread since code is repeated multiple times
+find_center_and_spread <- function(df) {
+  return(df|>
+  summarize(across(all_of(center_vars), 
+                 list("mean" = mean, "median" = median, "sd"=sd, "IQR"=IQR), 
+                 .names = "{.fn}_{.col}")))
+}
+
+# find measures of center and spread for all students
+all_measures <- find_center_and_spread(combo_df)
+all_measures
+
+# filter for students with rural address
+rural_measures <- combo_df |>
+  filter(address=="R") |>
+  find_center_and_spread()
+rural_measures
+
+# filter for students with romantic relationships
+romantic_measures <- combo_df |>
+  filter(romantic=="yes") |>
+  find_center_and_spread()
+romantic_measures
+
+```
+
+**Notes (all for math dataset):**
+
+-   Center for grades is fairly consistent across grading periods G1 and G3.
+-   All means and medians are fairly close except for those of absences; the distribution for absences seems skewed.
+-   The standard deviation for absences is large compared to the mean and median.
+-   Rural students have more absences and lower scores than students as a whole.
+-   Students with rural addresses or a romantic relationship have a greater number of absences on average, but the same median number of absences, which shows that their distribution of absences is even more skewed than for students as a whole.
+
+Measures of center and spread across single grouping variable:
+```{r}
+# group by sex
+sex_measures <- combo_df |>
+  group_by(sex) |>
+  find_center_and_spread()
+sex_measures
+```
+
+**Notes:**
+
+-   The number of absences for females is more spread out than for males, and there are some higher values (possibly outliers) that are skewing the data.
+-   The centers of grades are higher for male students.
+
+Measures of center and spread across two grouping variables:
+```{r}
+# group by sex and internet
+sex_internet_measures <- combo_df |>
+  group_by(sex, internet) |>
+  find_center_and_spread()
+sex_internet_measures
+```
+
+**Notes:**
+
+-   Students with internet access have a greater average number of absences, and those that are female and have internet access have a much larger spread in absence data.
+-   The largest spread in G3 grades is for males without internet access, and the smallest is for females without internet access. The difference between these two is large, suggesting there may be a differential effect on males and females of not having internet access.
+
+Correlation matrix:
+```{r}
+combo_df |>
+  select(all_of(all_num_vars)) |>
+  cor()
+```
+
+**Notes:**
+
+-   Expectedly, G1 and G3 have a strong positive correlation since G3 is calculated from G1. This information occupies the lower right 6x6 matrix of the correlation matrix.
+-   The next expected correlation is between absences in the math dataset and absences in the Portuguese dataset.
+-   The strongest unanticipated linearity is a negative relationship between age and g3, suggesting that older students have lower G3 scores.
+
+Histogram, kernel density plot, and boxplot for G3.x across internet value:
+```{r}
+# histogram
+ggplot(combo_df, aes(G3.x, fill=internet)) + geom_histogram(binwidth=2)
+
+# kernel density plot
+ggplot(combo_df, aes(x = G3.x)) + geom_density(alpha = 0.5, aes(fill = internet))
+
+# boxplot
+ggplot(combo_df) + geom_boxplot(aes(x = internet, y = G3.x, fill = internet))
+```
+
+**Notes:**
+
+-   The highest G3 scores were achieved by relatively few students without internet access.
+-   The middle 50% of G3 data was markedly higher for students with internet access.
+
+Histogram, kernel density plot, and boxplot for G3.x across romantic relationship value:
+```{r}
+# histogram
+ggplot(combo_df, aes(G3.x, fill=romantic)) + geom_histogram(binwidth=2)
+
+# kernel density plot
+ggplot(combo_df, aes(x = G3.x)) + geom_density(alpha = 0.5, aes(fill = romantic))
+
+# boxplot
+ggplot(combo_df) + geom_boxplot(aes(x = romantic, y = G3.x, fill = romantic))
+```
+
+**Notes:**
+
+-   Students with a romantic relationship made up a larger portion of students with a G3 score of 0.
+
+Scatterplots with G3.x variable:
+```{r}
+ggplot(combo_df, aes(x = absences.x, y = G3.x, color = address)) + geom_point(position = "jitter") + ggtitle("G3 Scores vs. Absences (Color=address)")
+
+ggplot(combo_df, aes(x = age, y = G3.x, color = sex)) + geom_point(position = "jitter") + ggtitle("G3 Scores vs. Age (Color=sex)")
+```
+
+**Notes:**
+
+-   There are 3 outlier points in absences.x that are likely obscuring patterns in the data.
+
+Now with faceting:
+```{r}
+ggplot(combo_df, aes(x = absences.x, y = G3.x, color = address)) + geom_point(position = "jitter") + 
+  ggtitle("G3 Scores vs. Absences by Sex (Color=address)") +
+  facet_wrap(~ sex)
+
+ggplot(combo_df, aes(x = age, y = G3.x, color = sex)) + geom_point(position = "jitter") + 
+  ggtitle("G3 Scores vs. Age by Romantic Relationship (Color=sex)") +
+  facet_wrap(~ romantic)
+```
+
+**Notes:**
+
+-   The 3 outliers in the absences data are all female.
+
+Now with faceting of 2 variables:
+```{r}
+ggplot(combo_df, aes(x = absences.x, y = G3.x, color = address)) + geom_point(position = "jitter") + 
+  ggtitle("G3 Scores vs. Absences by Sex and Romantic Relationship (Color=address)") +
+  facet_grid(sex ~ romantic)
+
+ggplot(combo_df, aes(x = age, y = G3.x, color = sex)) + geom_point(position = "jitter") + 
+  ggtitle("G3 Scores vs. Age by Romantic Relationship and Address Type (Color=sex)") +
+  facet_wrap(romantic ~ address)
+```
+
+**Notes:**
+
+-   The females with rural addresses in a romantic relationship are older than the males in the same category.
